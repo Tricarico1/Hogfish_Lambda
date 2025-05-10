@@ -1,0 +1,110 @@
+# Steps to Update and Deploy the Hogfish Lambda Docker Image
+
+## Problem Solved
+We fixed an "InvalidImage" Lambda error that occurred because deleted ECR images left the Lambda function pointing to non-existent images. We rebuilt the Docker image for the correct architecture (x86_64/amd64), pushed it to ECR, and recreated the Lambda function with proper role permissions.
+
+## Prerequisites
+- AWS CLI installed and configured
+- Docker installed
+- Code changes ready for deployment
+
+## Update and Deployment Steps
+
+### 1. Set Environment Variables
+```bash
+export AWS_ACCOUNT_ID=805358684705
+export AWS_REGION=us-east-1
+```
+
+### 2. Login to Amazon ECR
+```bash
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+```
+
+### 3. Build Docker Image (Important: Specify x86_64 Architecture)
+```bash
+# Build for x86_64/amd64 architecture (required for Lambda)
+docker buildx build --platform linux/amd64 -t hogfish-boating-conditions . --load
+```
+
+### 4. Tag and Push Image to ECR
+```bash
+# Tag the image
+docker tag hogfish-boating-conditions:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/hogfish-boating-conditions:latest
+
+# Push to ECR
+docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/hogfish-boating-conditions:latest
+```
+
+### 5. Update Lambda Function
+```bash
+# Update existing Lambda function
+aws lambda update-function-code \
+  --function-name Hogfish-api \
+  --image-uri $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/hogfish-boating-conditions:latest
+```
+
+## Troubleshooting
+
+### If "InvalidImage" Error Occurs:
+
+1. Verify image exists in ECR:
+```bash
+aws ecr list-images --repository-name hogfish-boating-conditions
+```
+
+2. If image issues persist, recreate the Lambda function:
+```bash
+# Delete the function
+aws lambda delete-function --function-name Hogfish-api
+
+# Create new function
+aws lambda create-function \
+  --function-name Hogfish-api \
+  --package-type Image \
+  --code ImageUri=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/hogfish-boating-conditions:latest \
+  --role arn:aws:iam::$AWS_ACCOUNT_ID:role/lambda-hogfish-execution-role \
+  --timeout 300 \
+  --memory-size 512
+```
+
+3. Reset CloudWatch Event trigger:
+```bash
+# Add permission for CloudWatch to invoke Lambda
+aws lambda add-permission \
+  --function-name Hogfish-api \
+  --statement-id hogfish-api-event \
+  --action lambda:InvokeFunction \
+  --principal events.amazonaws.com \
+  --source-arn arn:aws:events:$AWS_REGION:$AWS_ACCOUNT_ID:rule/hogfish-api-scheduler
+
+# Connect rule to Lambda
+aws events put-targets \
+  --rule hogfish-api-scheduler \
+  --targets "Id"="1","Arn"="arn:aws:lambda:$AWS_REGION:$AWS_ACCOUNT_ID:function:Hogfish-api"
+```
+
+## Common Issues and Solutions
+
+1. **Architecture mismatch**: Always build with `--platform linux/amd64` flag for AWS Lambda, especially when building on Apple Silicon (M1/M2) Macs.
+
+2. **Deleted ECR images**: If you delete images from ECR, make sure to update any Lambda functions that reference them.
+
+3. **Role permissions**: Lambda needs the proper IAM role with permissions. If unsure, use a role with Lambda basic execution permissions.
+
+4. **Timing issues**: After uploading a new image to ECR, wait a few seconds before updating the Lambda function.
+
+5. **Verify environment variables**: If your Lambda function requires environment variables, ensure they're properly set in the Lambda configuration.
+
+## Testing Your Changes
+
+Test the Lambda function after deployment:
+```bash
+aws lambda invoke --function-name Hogfish-api --payload '{}' response.json && cat response.json
+```
+
+## Notes
+
+- You can include the `--no-cache` flag with the Docker build command if you want to rebuild everything from scratch
+- Consider versioning your images with tags if you need to rollback to previous versions
+- For code changes, always build and push a new Docker image, then update the Lambda function 

@@ -1,0 +1,20 @@
+{
+  "name": "boating-conditions-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function to fetch and store boating weather data",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node test-locally.js",
+    "check-schema": "node check-schema.js",
+    "setup-schema": "node setup-schema.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+} 
