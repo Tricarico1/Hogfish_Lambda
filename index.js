@@ -245,6 +245,26 @@ async function processAndStoreData(weatherData, supabase) {
   }
 }
 
+// Process locations in parallel batches
+async function processBatch(coords, supabase, context) {
+  const batchPromises = coords.map(async (coord) => {
+    console.log(`🔍 Processing location [${coord.lat}, ${coord.lng}]`);
+    try {
+      const data = await fetchWeatherData(coord);
+      if (data) {
+        await processAndStoreData(data, supabase);
+        return { success: true, coord };
+      }
+      return { success: false, coord, error: 'No data returned' };
+    } catch (error) {
+      console.error(`❌ Error processing location [${coord.lat}, ${coord.lng}]:`, error);
+      return { success: false, coord, error: error.message };
+    }
+  });
+
+  return Promise.all(batchPromises);
+}
+
 // Main function with context
 async function updateWeatherData(context) {
   const supabase = getSupabaseClient(context);
@@ -265,30 +285,33 @@ async function updateWeatherData(context) {
       // Silently ignore count errors
     }
     
-    // Process each coordinate
+    // Process coordinates in batches of 5
+    const BATCH_SIZE = 5;
     let successCount = 0;
     let errorCount = 0;
     let apiCalls = 0;
     
-    for (const coord of COORDINATES) {
-      console.log(`🔍 Processing location [${coord.lat}, ${coord.lng}]`);
-      try {
-        const data = await fetchWeatherData(coord);
-        apiCalls += 2; // 1 call to marine API, 1 call to weather API
-        
-        if (data) {
-          await processAndStoreData(data, supabase);
+    // Split coordinates into batches
+    for (let i = 0; i < COORDINATES.length; i += BATCH_SIZE) {
+      const batch = COORDINATES.slice(i, i + BATCH_SIZE);
+      console.log(`\n📦 Processing batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(COORDINATES.length/BATCH_SIZE)}`);
+      
+      const results = await processBatch(batch, supabase, context);
+      apiCalls += batch.length * 2; // 2 API calls per location
+      
+      // Count successes and failures
+      results.forEach(result => {
+        if (result.success) {
           successCount++;
         } else {
           errorCount++;
         }
-      } catch (coordError) {
-        console.error(`❌ Error processing location [${coord.lat}, ${coord.lng}]:`, coordError);
-        errorCount++;
-      }
+      });
       
-      // Small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Small delay between batches to avoid overwhelming the APIs
+      if (i + BATCH_SIZE < COORDINATES.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
     
     // Count total records after update
