@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS weather_forecast (
   wind_speed DECIMAL(5, 1),
   wind_direction SMALLINT,
   precipitation_probability SMALLINT,
+  wind_gusts DECIMAL(5, 1),
+  cloud_cover SMALLINT,
+  temperature DECIMAL(4, 1),
+  precipitation_amount DECIMAL(5, 2),
+  ocean_current_velocity DECIMAL(4, 2),
+  ocean_current_direction SMALLINT,
+  sea_level_height DECIMAL(5, 2),
   PRIMARY KEY (forecast_date, id)
 ) PARTITION BY RANGE (forecast_date);
 `;
