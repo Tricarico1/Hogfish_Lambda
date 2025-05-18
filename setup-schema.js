@@ -10,25 +10,28 @@ const supabase = createClient(
 // SQL scripts to set up the schema
 const createTableSQL = `
 CREATE TABLE IF NOT EXISTS weather_forecast (
-  id BIGSERIAL,
+  id BIGSERIAL PRIMARY KEY,
   forecast_date DATE NOT NULL,
-  latitude DECIMAL(10, 6) NOT NULL,
-  longitude DECIMAL(10, 6) NOT NULL,
+  latitude DECIMAL(15, 12) NOT NULL,
+  longitude DECIMAL(15, 12) NOT NULL,
   forecast_timestamp TIMESTAMPTZ NOT NULL,
   wave_height DECIMAL(4, 2),
   wave_period DECIMAL(4, 1),
   wind_speed DECIMAL(5, 1),
-  wind_direction SMALLINT,
-  precipitation_probability SMALLINT,
+  wind_direction DECIMAL(5, 1),
+  precipitation_probability DECIMAL(5, 1),
   wind_gusts DECIMAL(5, 1),
-  cloud_cover SMALLINT,
+  cloud_cover DECIMAL(5, 1),
   temperature DECIMAL(4, 1),
   precipitation_amount DECIMAL(5, 2),
   ocean_current_velocity DECIMAL(4, 2),
-  ocean_current_direction SMALLINT,
-  sea_level_height DECIMAL(5, 2),
-  PRIMARY KEY (forecast_date, id)
-) PARTITION BY RANGE (forecast_date);
+  ocean_current_direction DECIMAL(5, 1),
+  sea_level_height DECIMAL(5, 2)
+);
+
+-- Create indexes for efficient lookups
+CREATE INDEX IF NOT EXISTS idx_weather_forecast_lat_lng ON weather_forecast (latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_weather_forecast_date ON weather_forecast (forecast_date);
 `;
 
 const createPoliciesSQL = `
@@ -49,73 +52,6 @@ USING (auth.role() = 'service_role');
 CREATE POLICY IF NOT EXISTS "Only service accounts can delete weather data" 
 ON weather_forecast FOR DELETE 
 USING (auth.role() = 'service_role');
-`;
-
-const createPartitionFunctionSQL = `
-CREATE OR REPLACE FUNCTION maintain_forecast_partitions()
-RETURNS void AS $$
-DECLARE
-    partition_name text;
-    start_date date;
-    end_date date;
-BEGIN
-    -- Create partitions for the next 15 days (to cover full API forecast range)
-    FOR i IN 0..14 LOOP
-        start_date := CURRENT_DATE + (i || ' days')::interval;
-        end_date := start_date + INTERVAL '1 day';
-        partition_name := 'weather_forecast_' || to_char(start_date, 'YYYYMMDD');
-        
-        -- Check if partition exists, if not create it
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_class c 
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.relname = partition_name AND n.nspname = 'public'
-        ) THEN
-            EXECUTE format(
-                'CREATE TABLE %I PARTITION OF weather_forecast 
-                FOR VALUES FROM (%L) TO (%L)',
-                partition_name, start_date, end_date
-            );
-        END IF;
-    END LOOP;
-    
-    -- Clean up old partitions
-    FOR partition_name IN
-        SELECT c.relname FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE c.relname LIKE 'weather_forecast_%'
-        AND n.nspname = 'public'
-        AND c.relkind = 'r'
-        AND substring(c.relname FROM 'weather_forecast_([0-9]+)')::date < CURRENT_DATE
-    LOOP
-        EXECUTE format('DROP TABLE IF EXISTS %I', partition_name);
-    END LOOP;
-END;
-$$ LANGUAGE plpgsql;
-`;
-
-const createPartitionCheckFunctionSQL = `
-CREATE OR REPLACE FUNCTION check_partitions_exist()
-RETURNS json AS $$
-DECLARE
-    result json;
-BEGIN
-    SELECT json_agg(row_to_json(t))
-    INTO result
-    FROM (
-        SELECT c.relname as partition_name, 
-               pg_size_pretty(pg_relation_size(c.oid)) as size
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE c.relname LIKE 'weather_forecast_%'
-        AND n.nspname = 'public'
-        AND c.relkind = 'r'
-        ORDER BY c.relname
-    ) t;
-    
-    RETURN COALESCE(result, '[]'::json);
-END;
-$$ LANGUAGE plpgsql;
 `;
 
 // Run a SQL query against the Supabase database
@@ -175,34 +111,53 @@ async function setupSchema() {
     console.log('\nWARNING: Failed to create RLS policies. You may need to run this SQL manually.');
   }
   
-  // Step 3: Create the partition maintenance function
-  const partitionFunctionCreated = await runSQL(createPartitionFunctionSQL, 'Create partition maintenance function');
-  if (!partitionFunctionCreated) {
-    console.log('\nERROR: Failed to create partition maintenance function. This is required for the Lambda to work.');
-    return;
-  }
-  
-  // Step 4: Create the partition check function
-  const checkFunctionCreated = await runSQL(createPartitionCheckFunctionSQL, 'Create partition check function');
-  if (!checkFunctionCreated) {
-    console.log('\nWARNING: Failed to create partition check function. This is not critical but helpful for debugging.');
-  }
-  
-  // Step 5: Run the partition maintenance function to create initial partitions
-  console.log('\nCreating initial partitions...');
+  // Test inserting a record
+  console.log('\nTesting data insertion...');
   try {
-    const { error } = await supabase.rpc('maintain_forecast_partitions');
-    if (error) {
-      console.error('Error running maintain_forecast_partitions:', error);
-      console.log('\nWARNING: Failed to create initial partitions. The Lambda may still work but should be verified.');
+    const testData = {
+      forecast_date: new Date().toISOString().split('T')[0],
+      latitude: 18.473662304914722,
+      longitude: -66.09893874222648,
+      forecast_timestamp: new Date().toISOString(),
+      wave_height: 1.2,
+      wave_period: 5.5,
+      wind_speed: 10.0,
+      wind_direction: 180.0,
+      precipitation_probability: 20.0
+    };
+    
+    // First delete any existing test record
+    await supabase
+      .from('weather_forecast')
+      .delete()
+      .eq('latitude', testData.latitude)
+      .eq('longitude', testData.longitude)
+      .eq('forecast_date', testData.forecast_date);
+    
+    // Insert test record
+    const { error: insertError } = await supabase
+      .from('weather_forecast')
+      .insert([testData]);
+    
+    if (insertError) {
+      console.error('Error inserting test record:', insertError);
+      console.log('\nWARNING: Test insertion failed. Schema might not be set up correctly.');
     } else {
-      console.log('Initial partitions created successfully!');
+      console.log('Test record successfully inserted!');
+      
+      // Delete the test record
+      await supabase
+        .from('weather_forecast')
+        .delete()
+        .eq('latitude', testData.latitude)
+        .eq('longitude', testData.longitude)
+        .eq('forecast_date', testData.forecast_date);
     }
   } catch (error) {
-    console.error('Exception running maintain_forecast_partitions:', error);
+    console.error('Exception during test insertion:', error);
   }
   
-  console.log('\nSchema setup complete! Run npm run check-schema to verify the setup.');
+  console.log('\nSchema setup complete!');
 }
 
 // Run the schema setup

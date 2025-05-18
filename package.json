@@ -8,7 +8,9 @@
     "start": "node test-locally.js",
     "check-schema": "node check-schema.js",
     "setup-schema": "node setup-schema.js",
-    "update-schema": "node update-schema.js"
+    "update-schema": "node update-schema.js",
+    "update-coordinate-precision": "node update-coordinate-precision.js",
+    "check-coordinates": "node check-coordinates.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

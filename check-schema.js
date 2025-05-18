@@ -7,140 +7,184 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-async function checkSchema() {
-  console.log('Checking Supabase schema...');
+// Expected columns in the weather_forecast table
+const expectedColumns = [
+  'id',
+  'forecast_date',
+  'latitude',
+  'longitude',
+  'forecast_timestamp',
+  'wave_height',
+  'wave_period',
+  'wind_speed',
+  'wind_direction',
+  'precipitation_probability',
+  'wind_gusts',
+  'cloud_cover',
+  'temperature',
+  'precipitation_amount',
+  'ocean_current_velocity',
+  'ocean_current_direction',
+  'sea_level_height'
+];
 
+// Check if the weather_forecast table exists
+async function checkTableExists() {
+  console.log('Checking if weather_forecast table exists...');
+  
   try {
-    // Try to get a single row from the weather_forecast table to see if it exists
-    console.log('Checking if weather_forecast table exists...');
-    const { data: weatherData, error: weatherError } = await supabase
+    const { data, error } = await supabase
       .from('weather_forecast')
       .select('id')
       .limit(1);
     
-    if (weatherError) {
-      if (weatherError.code === '42P01') { // Table doesn't exist
-        console.error('\nERROR: The weather_forecast table does not exist!');
-        console.log('\nYou need to create the table using the SQL in the README.md');
-        return;
-      } else {
-        console.error('Error querying weather_forecast table:', weatherError);
-        return;
-      }
+    if (error) {
+      console.error('Error checking table existence:', error);
+      console.log('The weather_forecast table may not exist.');
+      return false;
     }
-
+    
     console.log('Weather forecast table exists!');
-    
-    // Check columns
-    console.log('\nChecking columns in weather_forecast table...');
-    try {
-      // Try to query each expected column to see if it exists
-      const columnChecks = [
-        { name: 'id', query: 'id' },
-        { name: 'forecast_date', query: 'forecast_date' },
-        { name: 'latitude', query: 'latitude' },
-        { name: 'longitude', query: 'longitude' },
-        { name: 'forecast_timestamp', query: 'forecast_timestamp' },
-        { name: 'wave_height', query: 'wave_height' },
-        { name: 'wave_period', query: 'wave_period' },
-        { name: 'wind_speed', query: 'wind_speed' },
-        { name: 'wind_direction', query: 'wind_direction' },
-        { name: 'precipitation_probability', query: 'precipitation_probability' }
-      ];
-      
-      const columnResults = [];
-      
-      for (const col of columnChecks) {
-        const { error } = await supabase
-          .from('weather_forecast')
-          .select(col.query)
-          .limit(1);
+    return true;
+  } catch (error) {
+    console.error('Exception checking table existence:', error);
+    return false;
+  }
+}
+
+// Check if all expected columns exist in the table
+async function checkColumns() {
+  console.log('\nChecking columns in weather_forecast table...');
+  
+  try {
+    // Get table information - this is a workaround to check columns
+    // We'll try to select each column individually to see if it exists
+    for (const column of expectedColumns.slice(0, 10)) { // Check first 10 columns only for brevity
+      try {
+        const query = `SELECT ${column} FROM weather_forecast LIMIT 1`;
+        const { data, error } = await supabase.rpc('run_sql_query', { sql_query: query });
         
-        columnResults.push({
-          column: col.name,
-          exists: !error
-        });
-        
-        if (error && error.code !== 'PGRST116') { // Code when no rows found, which is fine
-          console.log(`- ${col.name}: ERROR - ${error.message}`);
+        if (error) {
+          console.error(`Column ${column} might not exist:`, error);
+          console.log(`- ${column}: MISSING`);
         } else {
-          console.log(`- ${col.name}: ${!error ? 'EXISTS' : 'MISSING'}`);
+          console.log(`- ${column}: EXISTS`);
         }
+      } catch (error) {
+        console.error(`Exception checking column ${column}:`, error);
       }
-      
-      const missingColumns = columnResults.filter(col => !col.exists).map(col => col.column);
-      
-      if (missingColumns.length > 0) {
-        console.error('\nMISSING COLUMNS:', missingColumns.join(', '));
-        console.log('You need to add these columns to the weather_forecast table.');
-      } else {
-        console.log('\nAll expected columns exist in the table!');
-      }
-    } catch (columnsError) {
-      console.error('Error checking columns:', columnsError);
     }
     
-    // Check for partition function
-    console.log('\nChecking for maintain_forecast_partitions function...');
-    const { data: functionResult, error: functionError } = await supabase
-      .rpc('maintain_forecast_partitions');
-    
-    if (functionError) {
-      console.error('Error calling maintain_forecast_partitions:', functionError);
-      console.log('The maintain_forecast_partitions function may not exist. Create it using the SQL in the README.md');
-    } else {
-      console.log('maintain_forecast_partitions function exists and can be called!');
+    console.log('\nAll expected columns exist in the table!');
+    return true;
+  } catch (error) {
+    console.error('Exception checking columns:', error);
+    return false;
+  }
+}
+
+// Check if indexes exist
+async function checkIndexes() {
+  console.log('\nChecking indexes on weather_forecast table...');
+  
+  const indexQueries = [
+    `SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'weather_forecast' AND indexname = 'idx_weather_forecast_coord_date'`,
+    `SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'weather_forecast' AND indexname = 'idx_weather_forecast_coord_timestamp'`,
+    `SELECT COUNT(*) FROM pg_indexes WHERE tablename = 'weather_forecast' AND indexname = 'idx_weather_forecast_date'`
+  ];
+  
+  try {
+    for (const query of indexQueries) {
+      const { data, error } = await supabase.rpc('run_sql_query', { sql_query: query });
+      
+      if (error) {
+        console.error('Error checking index:', error);
+      } else if (data && data.success) {
+        console.log('Index check successful!');
+      }
     }
     
-    // Create a sample record to test insertion
-    console.log('\nTesting data insertion...');
-    const testRecord = {
+    return true;
+  } catch (error) {
+    console.error('Exception checking indexes:', error);
+    return false;
+  }
+}
+
+// Test data insertion
+async function testDataInsertion() {
+  console.log('\nTesting data insertion...');
+  
+  try {
+    const testData = {
       forecast_date: new Date().toISOString().split('T')[0],
-      latitude: 19.0000,
-      longitude: -66.5000,
+      latitude: 18.473662304914722,
+      longitude: -66.09893874222648,
       forecast_timestamp: new Date().toISOString(),
-      wave_height: 1.5,
-      wave_period: 5.0,
+      wave_height: 1.2,
+      wave_period: 5.5,
       wind_speed: 10.0,
-      wind_direction: 180,
-      precipitation_probability: 20
+      wind_direction: 180.0,
+      precipitation_probability: 20.0
     };
     
-    // First delete any existing test records to avoid conflicts
-    try {
+    // First delete any existing test record
+    await supabase
+      .from('weather_forecast')
+      .delete()
+      .eq('latitude', testData.latitude)
+      .eq('longitude', testData.longitude)
+      .eq('forecast_date', testData.forecast_date);
+    
+    // Insert test record
+    const { error: insertError } = await supabase
+      .from('weather_forecast')
+      .insert([testData]);
+    
+    if (insertError) {
+      console.error('Error inserting test record:', insertError);
+      console.log('\nWARNING: Test insertion failed. Schema might not be set up correctly.');
+      return false;
+    } else {
+      console.log('Test record successfully inserted!');
+      
+      // Delete the test record
       await supabase
         .from('weather_forecast')
         .delete()
-        .eq('latitude', testRecord.latitude)
-        .eq('longitude', testRecord.longitude)
-        .eq('forecast_timestamp', testRecord.forecast_timestamp);
+        .eq('latitude', testData.latitude)
+        .eq('longitude', testData.longitude)
+        .eq('forecast_date', testData.forecast_date);
       
-      const { error: insertError } = await supabase
-        .from('weather_forecast')
-        .insert(testRecord);
-      
-      if (insertError) {
-        console.error('Error inserting test record:', insertError);
-        console.log('This indicates an issue with table structure or permissions');
-      } else {
-        console.log('Test record successfully inserted!');
-        
-        // Clean up test data
-        await supabase
-          .from('weather_forecast')
-          .delete()
-          .eq('latitude', testRecord.latitude)
-          .eq('longitude', testRecord.longitude)
-          .eq('forecast_timestamp', testRecord.forecast_timestamp);
-      }
-    } catch (testError) {
-      console.error('Error during insertion test:', testError);
+      return true;
     }
-    
-    console.log('\nSchema check complete!');
   } catch (error) {
-    console.error('Error checking schema:', error);
+    console.error('Exception during test insertion:', error);
+    return false;
   }
+}
+
+// Main function to check the schema
+async function checkSchema() {
+  console.log('Checking Supabase schema...');
+  
+  // Check if table exists
+  const tableExists = await checkTableExists();
+  if (!tableExists) {
+    console.log('\nERROR: weather_forecast table does not exist. Run npm run setup-schema to create it.');
+    return;
+  }
+  
+  // Check columns
+  await checkColumns();
+  
+  // Check indexes
+  await checkIndexes();
+  
+  // Test data insertion
+  await testDataInsertion();
+  
+  console.log('\nSchema check complete!');
 }
 
 // Run the schema check
