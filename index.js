@@ -149,6 +149,40 @@ const COORDINATES = [
   { lat: 18.564856320010346, lng: -67.2250446923689 }
 ];
 
+// Snorkeling coordinates with spot names and regions
+const SNORKELING_COORDINATES = [
+  { lat: 18.332075, lng: -65.319962, name: "Flamenco Beach", region: "Culebra" },
+  { lat: 18.310976, lng: -65.317206, name: "Carlos Rosario Beach", region: "Culebra" },
+  { lat: 18.316945, lng: -65.320134, name: "Tamarindo Beach", region: "Culebra" },
+  { lat: 18.310976, lng: -65.317206, name: "Luis Peña Keys", region: "Culebra" },
+  { lat: 18.2833, lng: -65.3000, name: "Punta Soldado Beach", region: "Culebra" },
+  { lat: 18.3188, lng: -65.2599, name: "Culebrita Island (Tortuga Beach)", region: "Culebra" },
+  { lat: 18.385006, lng: -65.626694, name: "Seven Seas Beach", region: "Fajardo" },
+  { lat: 18.381074, lng: -65.587063, name: "Icacos Island (Cayo Icacos)", region: "Fajardo" },
+  { lat: 18.343436, lng: -65.559195, name: "Palomino Island", region: "Fajardo" },
+  { lat: 18.4650, lng: -66.0820, name: "Escambrón Beach", region: "San Juan" },
+  { lat: 18.461118, lng: -66.082391, name: "Playita del Condado", region: "San Juan" },
+  { lat: 17.9730, lng: -66.9960, name: "La Parguera", region: "Lajas" },
+  { lat: 17.9400, lng: -66.8800, name: "Gilligan's Island (Cayo Aurora)", region: "Guanica" },
+  { lat: 18.4750, lng: -67.1600, name: "Crash Boat Beach", region: "Aguadilla" },
+  { lat: 18.3560, lng: -67.2600, name: "Steps Beach (Tres Palmas Marine Reserve)", region: "Rincón" },
+  { lat: 18.473056, lng: -67.168989, name: "Playa Peña Blanca", region: "Aguadilla" },
+  { lat: 18.3900, lng: -67.4800, name: "Desecheo Island", region: "Off West Coast" },
+  { lat: 18.1150, lng: -65.4100, name: "La Chiva Beach (Blue Beach)", region: "Vieques" },
+  { lat: 18.093051, lng: -65.466076, name: "Esperanza Beach", region: "Vieques" },
+  { lat: 18.1500, lng: -65.4200, name: "Mosquito Pier", region: "Vieques" },
+  { lat: 18.1000, lng: -65.4200, name: "Pata Prieta Beach", region: "Vieques" },
+  { lat: 18.1400, lng: -65.5700, name: "Punta Arenas (Green Beach)", region: "Vieques" },
+  { lat: 17.8900, lng: -66.5200, name: "Caja de Muertos Island", region: "Ponce" },
+  { lat: 17.9500, lng: -66.6200, name: "Cardona Island", region: "Ponce" },
+  { lat: 18.3000, lng: -65.3200, name: "Melones Beach", region: "Culebra" },
+  { lat: 18.385600, lng: -65.719125, name: "Luquillo Beach", region: "Luquillo" },
+  { lat: 18.5000, lng: -67.0700, name: "Jobos Beach", region: "Isabela" },
+  { lat: 18.4800, lng: -66.5000, name: "Mar Chiquita Beach", region: "Manatí" },
+  { lat: 17.9700, lng: -67.1800, name: "Isla de Ratones", region: "Cabo Rojo" },
+  { lat: 18.3580, lng: -67.2580, name: "Black Eagle Beach", region: "Rincón" }
+];
+
 // Improved function to fetch data for a single coordinate
 async function fetchWeatherData(coord) {
   try {
@@ -170,6 +204,7 @@ async function fetchWeatherData(coord) {
         time: weatherData.hourly.time,
         wave_height: marineData.hourly.wave_height,
         wave_period: marineData.hourly.wave_period,
+        wave_direction: marineData.hourly.wave_direction,
         wind_speed_10m: weatherData.hourly.wind_speed_10m,
         wind_direction_10m: weatherData.hourly.wind_direction_10m,
         precipitation_probability: weatherData.hourly.precipitation_probability,
@@ -198,6 +233,7 @@ async function fetchMarineData(coord) {
     hourly: [
       "wave_height", 
       "wave_period",
+      "wave_direction",
       "ocean_current_velocity",
       "ocean_current_direction",
       "sea_level_height_msl"
@@ -228,9 +264,10 @@ async function fetchMarineData(coord) {
       ),
       wave_height: hourly.variables(0).valuesArray(),
       wave_period: hourly.variables(1).valuesArray(),
-      ocean_current_velocity: hourly.variables(2).valuesArray(),
-      ocean_current_direction: hourly.variables(3).valuesArray(),
-      sea_level_height_msl: hourly.variables(4).valuesArray()
+      wave_direction: hourly.variables(2).valuesArray(),
+      ocean_current_velocity: hourly.variables(3).valuesArray(),
+      ocean_current_direction: hourly.variables(4).valuesArray(),
+      sea_level_height_msl: hourly.variables(5).valuesArray()
     };
     
     return { hourly: hourlyData };
@@ -381,6 +418,300 @@ async function processAndStoreData(weatherData, supabase) {
   }
 }
 
+// Get directional coefficient K based on spot location and swell direction
+function getDirectionalCoefficient(spotName, region, swellDirection) {
+  // Default K value
+  let K = 0.7;
+  
+  // Normalize swell direction to 0-360 range
+  const direction = swellDirection || 0;
+  
+  // Regional directional coefficients based on Puerto Rico geography
+  const spotCoefficients = {
+    // North Coast spots (exposed to Atlantic swells)
+    "Crash Boat Beach": {
+      favorable: [270, 360, 45], // NW to NE swells
+      unfavorable: [90, 180], // E to S swells
+      K_favorable: 0.9,
+      K_unfavorable: 0.3
+    },
+    "Steps Beach (Tres Palmas Marine Reserve)": {
+      favorable: [270, 360, 45],
+      unfavorable: [90, 180],
+      K_favorable: 0.8,
+      K_unfavorable: 0.2
+    },
+    "Playa Peña Blanca": {
+      favorable: [270, 360, 45],
+      unfavorable: [90, 180],
+      K_favorable: 0.9,
+      K_unfavorable: 0.3
+    },
+    
+    // East Coast spots (somewhat protected)
+    "Seven Seas Beach": {
+      favorable: [180, 270], // S to W swells (offshore)
+      unfavorable: [45, 135], // NE to SE swells (onshore)
+      K_favorable: 0.8,
+      K_unfavorable: 0.4
+    },
+    "Luquillo Beach": {
+      favorable: [180, 270],
+      unfavorable: [45, 135],
+      K_favorable: 0.8,
+      K_unfavorable: 0.4
+    },
+    
+    // South Coast spots (generally calmer)
+    "La Parguera": {
+      favorable: [315, 45], // NW to NE swells (offshore)
+      unfavorable: [135, 225], // SE to SW swells (onshore)
+      K_favorable: 0.9,
+      K_unfavorable: 0.5
+    },
+    "Gilligan's Island (Cayo Aurora)": {
+      favorable: [315, 45],
+      unfavorable: [135, 225],
+      K_favorable: 0.9,
+      K_unfavorable: 0.5
+    },
+    
+    // West Coast spots (can be rough)
+    "Black Eagle Beach": {
+      favorable: [45, 135], // NE to SE swells (offshore)
+      unfavorable: [225, 315], // SW to NW swells (onshore)
+      K_favorable: 0.7,
+      K_unfavorable: 0.2
+    },
+    
+    // Protected bays and islands (generally good)
+    "Flamenco Beach": {
+      favorable: [180, 360], // Generally protected
+      unfavorable: [45, 135], // Strong E swells
+      K_favorable: 0.9,
+      K_unfavorable: 0.6
+    },
+    "Carlos Rosario Beach": {
+      favorable: [180, 360],
+      unfavorable: [45, 135],
+      K_favorable: 0.9,
+      K_unfavorable: 0.6
+    },
+    "Esperanza Beach": {
+      favorable: [270, 90], // Generally protected
+      unfavorable: [135, 225], // Strong S swells
+      K_favorable: 0.8,
+      K_unfavorable: 0.5
+    }
+  };
+  
+  // Get spot-specific coefficients
+  const spotData = spotCoefficients[spotName];
+  if (spotData) {
+    // Check if direction falls in favorable range
+    const isFavorable = spotData.favorable.some(favorableDir => 
+      Math.abs(direction - favorableDir) <= 45 || 
+      Math.abs(direction - favorableDir) >= 315
+    );
+    
+    const isUnfavorable = spotData.unfavorable.some(unfavorableDir => 
+      Math.abs(direction - unfavorableDir) <= 45
+    );
+    
+    if (isFavorable) {
+      K = spotData.K_favorable;
+    } else if (isUnfavorable) {
+      K = spotData.K_unfavorable;
+    }
+  } else {
+    // Regional defaults based on general location
+    if (region === "Culebra" || region === "Vieques") {
+      K = 0.8; // Generally protected
+    } else if (region === "Fajardo") {
+      K = 0.7; // Somewhat exposed
+    } else if (region === "San Juan") {
+      K = 0.6; // Urban, more exposed
+    } else if (region === "Aguadilla" || region === "Rincón" || region === "Isabela") {
+      K = 0.5; // West coast, can be rough
+    } else if (region === "Ponce" || region === "Guanica" || region === "Lajas") {
+      K = 0.8; // South coast, generally calmer
+    }
+  }
+  
+  return K;
+}
+
+// Calculate snorkeling suitability energy score (0-100) using MCP approach
+function calculateSnorkelingScore(waveHeight, wavePeriod, swellDirection, windSpeed, windDirection, precipitationProbability, precipitationAmount, cloudCover, temp, spotName, region) {
+  // Step 1: Get directional coefficient K
+  const K = getDirectionalCoefficient(spotName, region, swellDirection);
+  
+  // Step 2: Calculate base wave energy
+  const H = waveHeight || 0;
+  const T = wavePeriod || 8; // Default period if not available
+  const baseEnergy = K * (H * H) * T;
+  
+  // Step 3: Start with scaled base energy (scale to reasonable range)
+  let suitabilityScore = baseEnergy * 10;
+  
+  // Step 4: Apply penalties and bonuses
+  
+  // Wind speed penalty (ideal: <10 knots)
+  if (windSpeed > 10) {
+    suitabilityScore -= (windSpeed - 10) * 2;
+  }
+  
+  // Wind direction penalty (onshore winds are generally worse)
+  // This is a simplified check - in reality you'd need spot-specific wind exposure
+  if (windSpeed > 15) {
+    // Additional penalty for strong onshore winds based on region
+    if (region === "Aguadilla" || region === "Rincón") {
+      // West coast spots suffer from strong easterly winds
+      if (windDirection >= 45 && windDirection <= 135) {
+        suitabilityScore -= 10;
+      }
+    } else if (region === "Fajardo" || region === "Luquillo") {
+      // East coast spots suffer from strong westerly winds
+      if (windDirection >= 225 && windDirection <= 315) {
+        suitabilityScore -= 10;
+      }
+    }
+  }
+  
+  // Rain impact (heavy penalty for rain)
+  if (precipitationProbability > 30 || precipitationAmount > 0.5) {
+    suitabilityScore -= 30;
+  } else if (precipitationProbability > 15 || precipitationAmount > 0.1) {
+    suitabilityScore -= 15;
+  }
+  
+  // Cloud cover impact (reduces visibility and enjoyment)
+  if (cloudCover > 80) {
+    suitabilityScore -= 5;
+  } else if (cloudCover > 60) {
+    suitabilityScore -= 3;
+  }
+  
+  // Temperature impact (ideal: 24-29°C / 75-85°F)
+  if (temp < 20 || temp > 32) {
+    suitabilityScore -= 15;
+  } else if (temp < 22 || temp > 30) {
+    suitabilityScore -= 8;
+  }
+  
+  // Bonus for ideal conditions
+  if (H < 0.5 && windSpeed < 8 && precipitationProbability < 10 && cloudCover < 30) {
+    suitabilityScore += 10; // Perfect conditions bonus
+  }
+  
+  // Clamp score between 0 and 100
+  return Math.max(0, Math.min(100, Math.round(suitabilityScore)));
+}
+
+// Process and store data in Supabase snorkeling_spots table
+async function processAndStoreSnorkelingData(weatherData, supabase, spotInfo) {
+  if (!weatherData || !weatherData.hourly) return;
+  
+  const { latitude, longitude, hourly } = weatherData;
+  const { 
+    time, 
+    wave_height, 
+    wave_period,
+    wave_direction,
+    wind_speed_10m, 
+    wind_direction_10m, 
+    precipitation_probability,
+    wind_gusts_10m,
+    cloud_cover,
+    temperature_2m,
+    precipitation,
+    ocean_current_velocity,
+    ocean_current_direction,
+    sea_level_height_msl
+  } = hourly;
+  
+  console.log(`Inserting snorkeling data for ${spotInfo.name} (${latitude},${longitude})`);
+  
+  // Process each hourly data point
+  const forecasts = time.map((timestamp, index) => {
+    const date = new Date(timestamp);
+    
+    // Calculate snorkeling suitability score using enhanced MCP approach
+    const energy = calculateSnorkelingScore(
+      wave_height?.[index] || 0,
+      wave_period?.[index] || 8,
+      wave_direction?.[index] || 0, // Actual swell wave direction
+      wind_speed_10m?.[index] || 0,
+      wind_direction_10m?.[index] || 0,
+      precipitation_probability?.[index] || 0,
+      precipitation?.[index] || 0,
+      cloud_cover?.[index] || 0,
+      temperature_2m?.[index] || 25,
+      spotInfo.name,
+      spotInfo.region
+    );
+    
+    return {
+      name_of_snorkeling_spot: spotInfo.name,
+      region: spotInfo.region,
+      forecast_date: date.toISOString().split('T')[0],
+      latitude: latitude,
+      longitude: longitude,
+      forecast_timestamp: timestamp,
+      wave_height: wave_height?.[index] || null,
+      wave_period: wave_period?.[index] || null,
+      wind_speed: wind_speed_10m?.[index] || null,
+      wind_direction: wind_direction_10m?.[index] || null,
+      precipitation_probability: precipitation_probability?.[index] || null,
+      wind_gusts: wind_gusts_10m?.[index] || null,
+      cloud_cover: cloud_cover?.[index] || null,
+      temperature: temperature_2m?.[index] || null,
+      precipitation_amount: precipitation?.[index] || null,
+      ocean_current_velocity: ocean_current_velocity?.[index] || null,
+      ocean_current_direction: ocean_current_direction?.[index] || null,
+      sea_level_height: sea_level_height_msl?.[index] || null,
+      swell_wave_direction: wave_direction?.[index] || null, // Actual swell wave direction
+      energy: energy
+    };
+  });
+  
+  // Insert data in larger chunks - 168 is typically a full week of hourly data
+  const CHUNK_SIZE = 168;
+  
+  try {
+    // First delete existing records for this spot and time range
+    const precision = 0.0001; // Small buffer for floating point precision
+    const startDate = new Date(time[0]);
+    const endDate = new Date(time[time.length - 1]);
+    
+    await supabase
+      .from('snorkeling_spots')
+      .delete()
+      .eq('name_of_snorkeling_spot', spotInfo.name)
+      .gte('latitude', parseFloat(latitude) - precision)
+      .lte('latitude', parseFloat(latitude) + precision)
+      .gte('longitude', parseFloat(longitude) - precision)
+      .lte('longitude', parseFloat(longitude) + precision)
+      .gte('forecast_timestamp', startDate.toISOString())
+      .lte('forecast_timestamp', endDate.toISOString());
+    
+    // Insert data in larger chunks
+    for (let i = 0; i < forecasts.length; i += CHUNK_SIZE) {
+      const chunk = forecasts.slice(i, i + CHUNK_SIZE);
+      
+      const { error: insertError } = await supabase
+        .from('snorkeling_spots')
+        .insert(chunk);
+      
+      if (insertError) {
+        console.error(`Error inserting snorkeling data for ${spotInfo.name}:`, insertError);
+      }
+    }
+  } catch (error) {
+    console.error(`Error processing snorkeling data for ${spotInfo.name}:`, error);
+  }
+}
+
 // Process locations in parallel batches
 async function processBatch(coords, supabase, context) {
   const batchPromises = coords.map(async (coord) => {
@@ -401,6 +732,26 @@ async function processBatch(coords, supabase, context) {
   return Promise.all(batchPromises);
 }
 
+// Process snorkeling locations in parallel batches
+async function processSnorkelingBatch(coords, supabase, context) {
+  const batchPromises = coords.map(async (coord) => {
+    console.log(`🏊 Processing snorkeling spot [${coord.name}] at [${coord.lat}, ${coord.lng}]`);
+    try {
+      const data = await fetchWeatherData(coord);
+      if (data) {
+        await processAndStoreSnorkelingData(data, supabase, coord);
+        return { success: true, coord };
+      }
+      return { success: false, coord, error: 'No data returned' };
+    } catch (error) {
+      console.error(`❌ Error processing snorkeling spot [${coord.name}]:`, error);
+      return { success: false, coord, error: error.message };
+    }
+  });
+
+  return Promise.all(batchPromises);
+}
+
 // Main function with context - optimized for batch processing
 async function updateWeatherData(context) {
   const supabase = getSupabaseClient(context);
@@ -408,29 +759,39 @@ async function updateWeatherData(context) {
   console.log(`🚀 Starting weather data update at ${new Date().toISOString()}`);
   
   try {
-    // Count total records before update
+    // Count total records before update for both tables
+    let weatherRecordsBefore = 0;
+    let snorkelingRecordsBefore = 0;
+    
     try {
-      const { count, error: countError } = await supabase
+      const { count: weatherCount } = await supabase
         .from('weather_forecast')
         .select('*', { count: 'exact', head: true });
+      weatherRecordsBefore = weatherCount || 0;
       
-      if (!countError) {
-        console.log(`📊 Total records before update: ${count || 0}`);
-      }
+      const { count: snorkelingCount } = await supabase
+        .from('snorkeling_spots')
+        .select('*', { count: 'exact', head: true });
+      snorkelingRecordsBefore = snorkelingCount || 0;
+      
+      console.log(`📊 Records before update - Weather: ${weatherRecordsBefore}, Snorkeling: ${snorkelingRecordsBefore}`);
     } catch (countError) {
       // Silently ignore count errors
     }
     
     // Process coordinates in batches of 15
     const BATCH_SIZE = 15;
-    let successCount = 0;
-    let errorCount = 0;
+    let weatherSuccessCount = 0;
+    let weatherErrorCount = 0;
+    let snorkelingSuccessCount = 0;
+    let snorkelingErrorCount = 0;
     let apiCalls = 0;
     
-    // Split coordinates into batches
+    // Process weather forecast coordinates
+    console.log(`\n🌊 Processing ${COORDINATES.length} weather forecast locations...`);
     for (let i = 0; i < COORDINATES.length; i += BATCH_SIZE) {
       const batch = COORDINATES.slice(i, i + BATCH_SIZE);
-      console.log(`\n📦 Processing batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(COORDINATES.length/BATCH_SIZE)}`);
+      console.log(`\n📦 Processing weather batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(COORDINATES.length/BATCH_SIZE)}`);
       
       const results = await processBatch(batch, supabase, context);
       apiCalls += batch.length * 2; // 2 API calls per location
@@ -438,42 +799,82 @@ async function updateWeatherData(context) {
       // Count successes and failures
       results.forEach(result => {
         if (result.success) {
-          successCount++;
+          weatherSuccessCount++;
         } else {
-          errorCount++;
+          weatherErrorCount++;
         }
       });
       
-      // Smaller delay between batches - we're increasing batch size but reducing delay
-      // This helps to maintain a steady flow without overwhelming the APIs
+      // Delay between batches
       if (i + BATCH_SIZE < COORDINATES.length) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
     
-    // Count total records after update
+    // Process snorkeling coordinates
+    console.log(`\n🏊 Processing ${SNORKELING_COORDINATES.length} snorkeling spots...`);
+    for (let i = 0; i < SNORKELING_COORDINATES.length; i += BATCH_SIZE) {
+      const batch = SNORKELING_COORDINATES.slice(i, i + BATCH_SIZE);
+      console.log(`\n📦 Processing snorkeling batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(SNORKELING_COORDINATES.length/BATCH_SIZE)}`);
+      
+      const results = await processSnorkelingBatch(batch, supabase, context);
+      apiCalls += batch.length * 2; // 2 API calls per location
+      
+      // Count successes and failures
+      results.forEach(result => {
+        if (result.success) {
+          snorkelingSuccessCount++;
+        } else {
+          snorkelingErrorCount++;
+        }
+      });
+      
+      // Delay between batches
+      if (i + BATCH_SIZE < SNORKELING_COORDINATES.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    // Count total records after update for both tables
+    let weatherRecordsAfter = 0;
+    let snorkelingRecordsAfter = 0;
+    
     try {
-      const { count, error: countError } = await supabase
+      const { count: weatherCount } = await supabase
         .from('weather_forecast')
         .select('*', { count: 'exact', head: true });
+      weatherRecordsAfter = weatherCount || 0;
       
-      if (!countError) {
-        console.log(`📊 Total records after update: ${count || 0}`);
-      }
+      const { count: snorkelingCount } = await supabase
+        .from('snorkeling_spots')
+        .select('*', { count: 'exact', head: true });
+      snorkelingRecordsAfter = snorkelingCount || 0;
+      
+      console.log(`📊 Records after update - Weather: ${weatherRecordsAfter}, Snorkeling: ${snorkelingRecordsAfter}`);
     } catch (countError) {
       // Silently ignore count errors
     }
     
     const totalTime = (Date.now() - startTime) / 1000;
+    const totalSuccessCount = weatherSuccessCount + snorkelingSuccessCount;
+    const totalErrorCount = weatherErrorCount + snorkelingErrorCount;
+    
     console.log(`✅ Weather data update completed at ${new Date().toISOString()}`);
-    console.log(`📋 Summary: ${successCount} locations updated, ${errorCount} failures, ${apiCalls} API calls in ${totalTime.toFixed(1)} seconds`);
-    console.log(`📈 Performance: ${(successCount/totalTime).toFixed(2)} locations/second, ${(apiCalls/totalTime).toFixed(2)} API calls/second`);
+    console.log(`📋 Summary:`);
+    console.log(`   Weather locations: ${weatherSuccessCount} updated, ${weatherErrorCount} failures`);
+    console.log(`   Snorkeling spots: ${snorkelingSuccessCount} updated, ${snorkelingErrorCount} failures`);
+    console.log(`   Total: ${totalSuccessCount} locations updated, ${totalErrorCount} failures, ${apiCalls} API calls in ${totalTime.toFixed(1)} seconds`);
+    console.log(`📈 Performance: ${(totalSuccessCount/totalTime).toFixed(2)} locations/second, ${(apiCalls/totalTime).toFixed(2)} API calls/second`);
     
     return { 
       success: true,
       summary: {
-        locationsUpdated: successCount,
-        locationsFailed: errorCount,
+        weatherLocationsUpdated: weatherSuccessCount,
+        weatherLocationsFailed: weatherErrorCount,
+        snorkelingLocationsUpdated: snorkelingSuccessCount,
+        snorkelingLocationsFailed: snorkelingErrorCount,
+        totalLocationsUpdated: totalSuccessCount,
+        totalLocationsFailed: totalErrorCount,
         apiCalls: apiCalls,
         executionTime: totalTime,
         requestId: context ? context.awsRequestId : null

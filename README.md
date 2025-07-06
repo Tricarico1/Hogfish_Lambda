@@ -1,10 +1,12 @@
 # Hogfish Lambda Weather Data Service
 
-This repository contains a Lambda function that fetches weather/boating condition data from Open-Meteo API every 4 hours and stores it in a Supabase database.
+This repository contains a Lambda function that fetches weather/boating condition data from Open-Meteo API every 4 hours and stores it in a Supabase database. **Now includes support for snorkeling spots with calculated suitability scores!**
 
 ## Database Schema Setup
 
-Before using this Lambda function, make sure your Supabase database is properly set up with the following schema:
+Before using this Lambda function, make sure your Supabase database is properly set up with the following schemas:
+
+### Weather Forecast Table (Existing)
 
 ```sql
 -- Weather Forecast Table (with Date Partitioning)
@@ -104,6 +106,43 @@ BEGIN
     RETURN COALESCE(result, '[]'::json);
 END;
 $$ LANGUAGE plpgsql;
+```
+
+### Snorkeling Spots Table (NEW!)
+
+Run the `setup-snorkeling-schema.sql` file in your Supabase SQL editor to create the snorkeling spots table:
+
+```bash
+# The setup script includes:
+# - snorkeling_spots table with all weather data fields plus suitability scoring
+# - Row Level Security policies
+# - Performance indexes
+# - Optional view for excellent conditions (energy >= 75)
+```
+
+The snorkeling spots table includes:
+- All standard weather/marine data fields
+- **Snorkeling spot name and region** for easy identification
+- **Energy score (0-100)** - calculated suitability score based on:
+  - Wave height (ideal: 0-1m)
+  - Wind speed (ideal: <10 knots)
+  - Precipitation (penalizes rain)
+  - Cloud cover (penalizes heavy clouds)
+  - Temperature (ideal: 24-29°C / 75-85°F)
+
+## Features
+
+- **30 snorkeling spots** across Puerto Rico including:
+  - **Culebra**: Flamenco Beach, Carlos Rosario, Tamarindo, Luis Peña Keys
+  - **Vieques**: La Chiva Beach, Esperanza, Mosquito Pier
+  - **Fajardo**: Seven Seas, Icacos Island, Palomino Island
+  - **San Juan**: Escambrón Beach, Playita del Condado
+  - **West Coast**: Steps Beach, Crash Boat, Desecheo Island
+  - And many more!
+
+- **Intelligent suitability scoring** for snorkeling conditions
+- **Dual data processing** - updates both weather forecast and snorkeling data
+- **Optimized batch processing** for efficient API usage
 
 ## Setup Instructions
 
@@ -155,27 +194,45 @@ aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --
 ### 6. Build and deploy
 
 ```bash
-# Build the Docker image
-docker build -t hogfish-boating-conditions . 
-
-
-
-
-#Log into ECR
+# Build the Docker image (Choose x86_64)
+docker buildx build --platform linux/amd64 -t hogfish-boating-conditions . --load
+# Log into ECR
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
 # Tag the image for ECR
 docker tag hogfish-boating-conditions:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/hogfish-boating-conditions:latest                
 
-
 # Push to ECR
 docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/hogfish-boating-conditions:latest
 ```
 
-
 ## Coordinates Configuration
 
-Update the `COORDINATES` array in `index.js` with the actual coordinates you want to fetch data for.
+The Lambda function now processes two sets of coordinates:
+
+1. **COORDINATES** - Original weather forecast locations (100+ points around Puerto Rico)
+2. **SNORKELING_COORDINATES** - 30 popular snorkeling spots with names and regions
+
+Both coordinate sets are pre-configured in `index.js` but can be modified as needed.
+
+## What's New in This Update
+
+✅ **Dual Database Support**: Now writes to both `weather_forecast` and `snorkeling_spots` tables  
+✅ **30 Snorkeling Spots**: Added coordinates for the best snorkeling locations in Puerto Rico  
+✅ **Suitability Scoring**: Intelligent 0-100 scoring system for snorkeling conditions  
+✅ **Enhanced Logging**: Separate tracking for weather and snorkeling data processing  
+✅ **Backward Compatible**: Existing weather forecast functionality unchanged  
+
+## Database Setup Steps
+
+1. **Create the snorkeling_spots table**:
+   ```bash
+   # Run setup-snorkeling-schema.sql in your Supabase SQL editor
+   ```
+
+2. **Verify both tables exist**:
+   - `weather_forecast` (existing)
+   - `snorkeling_spots` (new)
 
 ## Testing Locally
 
@@ -189,4 +246,4 @@ npm install  # Install dependencies
 npm start    # Run the local test script
 ```
 
-This will execute the function and display the results, allowing you to verify that it's working correctly before deployment.
+This will execute the function and display results for both weather forecast and snorkeling data processing.
